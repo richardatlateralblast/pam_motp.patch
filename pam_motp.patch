@@ -1,0 +1,99 @@
+--- pam_mobile_otp/Makefile	2012-03-04 20:55:16.000000000 +1100
++++ pam_mobile_otp.patched/Makefile	2013-01-21 19:03:55.697570489 +1100
+@@ -5,17 +5,14 @@
+ 	OPTS="-D_TRACE_ -Wall" make all
+ 
+ pam_mobile_otp.o	: pam_mobile_otp.c
+-	gcc -fPIC -c pam_mobile_otp.c
++	gcc -fPIC -D_REENTRANT -c pam_mobile_otp.c 
+ 
+-pam_mobile_otp.so	: pam_mobile_otp.o md5.o
+-	gcc --shared -fPIC -o pam_mobile_otp.so pam_mobile_otp.o \
+-		md5.o -lpam
+-
+-md5.o	: md5.c
+-	gcc -fPIC -c md5.c -DSTDC_HEADERS
++pam_mobile_otp.so	: pam_mobile_otp.o
++	ld -G -z defs -o pam_mobile_otp.so pam_mobile_otp.o \
++	      -lpam -lc -lmd5
+ 
+ install	: pam_mobile_otp.so
+-	cp pam_mobile_otp.so /lib/security/pam_mobile_otp.so
++	cp pam_mobile_otp.so /usr/lib/security/pam_mobile_otp.so.1
+ 
+ clean	: 
+ 	rm *.o *.so
+--- pam_mobile_otp/pam_mobile_otp.c	2012-03-04 20:55:16.000000000 +1100
++++ pam_mobile_otp.patched/pam_mobile_otp.c	2013-01-21 19:13:38.926223724 +1100
+@@ -22,7 +22,7 @@
+ 
+ #define MAX_TRIES 5
+ 
+-#define MAX_DIFF 360
++#define MAX_DIFF 720
+ 
+ /*
+   secret   = init string created by #**#
+@@ -59,13 +59,7 @@
+ #define PAM_SM_PASSWORD
+ #include <security/pam_modules.h>
+ 
+-#ifdef SOLARIS
+ #define PAM_EXTERN
+-#endif
+-
+-#ifndef SOLARIS
+-#include "md5.h"
+-#endif
+ 
+ #define TO_STR(str) TO_STR_2(str)
+ #define TO_STR_2(str) #str
+@@ -91,8 +85,14 @@
+   closelog();
+ }
+ 
+-
+-
++void removeChar(char *str, char garbage) {
++  char *src, *dst;
++  for (src = dst = str; *src != '\0'; src++) {
++    *dst = *src;
++    if (*dst != garbage) dst++;
++  }
++  *dst = '\0';
++}
+ 
+ #define NOT_IMPLEMENTED(fct) \
+      _pam_log (LOG_ERR, "error: " #fct " is not implemented by pam_mobile_otp")
+@@ -135,11 +135,7 @@
+     unsigned char md5sum[16];
+     int i;
+     snprintf ( buffer, BUFSIZE, "%0ld%s%s", now, secret, PIN );
+-#ifdef SOLARIS
+     md5_calc ( md5sum, buffer, strlen(buffer) );
+-#else
+-    md5_buffer ( buffer, strlen(buffer), md5sum );
+-#endif
+     for (i=0; i<LEN_OTP/2 && i<=sizeof(md5sum); i++ )
+       sprintf( buffer+2*i, "%02x", md5sum[i] );
+     buffer[LEN_OTP]=0;
+@@ -254,8 +250,18 @@
+   /* passcode ok? */
+   retval=PAM_AUTH_ERR;
+ 
++  time_t  time_now = time(NULL);
++  struct tm tnow = *gmtime(&time_now);
++  char buff[100];
++  strftime( buff, sizeof buff, "%z", &tnow );
++  char* str = malloc(strlen(buff)+1);
++  strcpy(str, buff);
++  removeChar(str, '+');
++  removeChar(str, '-');
++  int gmt=atoi(str);
++  gmt /= 100;
+   now = time(NULL);      
+-  now += 3600*offset;
++  now += 3600*(offset-gmt);
+   now /= 10;
+   now -= maxdiff/10/2;
+   i = now + maxdiff/10;
